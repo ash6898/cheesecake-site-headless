@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jcr:root xmlns:jcr="http://www.jcp.org/jcr/1.0"
+          xmlns:sling="http://sling.apache.org/jcr/sling/1.0"
+          jcr:primaryType="nt:unstructured"
+          jcr:title="Scarborough Bluffs Park"
+          date="2026-06-14"
+          location="Scarborough Bluffs Park, Toronto"
+          hours="10:00 AM - 4:00 PM"
+          active="{Boolean}true"/>
