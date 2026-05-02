@@ -1,0 +1,42 @@
+services:
+  sling:
+    image: apache/sling:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - sling-launcher:/opt/sling/launcher
+    networks:
+      - cheesecake-network
+
+  dispatcher:
+    build: ./dispatcher
+    ports:
+      - "80:80"
+    depends_on:
+      - sling
+    volumes:
+      - dispatcher-cache:/var/cache/apache2
+      - dispatcher-logs:/var/log/apache2
+    networks:
+      - cheesecake-network
+
+  frontend:
+    build: ./frontend
+    ports:
+    - "3000:3000"
+    depends_on:
+    - dispatcher
+    environment:
+    - API_URL=http://dispatcher
+    networks:
+    - cheesecake-network
+
+volumes:
+  sling-launcher:
+  dispatcher-cache:
+  dispatcher-logs:
+
+networks:
+  cheesecake-network:
+    driver: bridge
+    

@@ -1,12 +1,13 @@
 async function getMenu() {
-  const res = await fetch('http://localhost/graphql/execute.json/cheesecake/menu', {
-    cache: 'no-store'
-  });
+  const url = `${process.env.API_URL}/graphql/execute.json/cheesecake/menu`;
+  console.log('Fetching menu from:', url);
+  const res = await fetch(url, { cache: 'no-store' });
+  console.log('Response status:', res.status);
   return res.json();
 }
 
 async function getEvents() {
-  const res = await fetch('http://localhost/graphql/execute.json/cheesecake/events', {
+  const res = await fetch(`${process.env.API_URL}/graphql/execute.json/cheesecake/events`, {
     cache: 'no-store'
   });
   return res.json();
