@@ -9,28 +9,39 @@ import org.apache.sling.api.resource.Resource;
 import org.apache.sling.api.resource.ResourceUtil;
 import org.apache.sling.api.resource.ValueMap;
 import org.apache.sling.api.servlets.SlingSafeMethodsServlet;
-import org.apache.sling.servlets.annotations.SlingServletPaths;
+import org.apache.sling.servlets.annotations.SlingServletResourceTypes;
 import org.osgi.service.component.annotations.Component;
 
 import javax.servlet.Servlet;
 import javax.servlet.ServletException;
 import java.io.IOException;
 
+/**
+ * JSON for the events collection.
+ *
+ * Bound by resource type, selector, and extension. Sling invokes this
+ * servlet for GET /content/cheesecake/events.model.json when that resource
+ * has sling:resourceType=cheesecake/components/events.
+ * The body is hand-built JSON, not a GraphQL execution.
+ */
 @Component(service = Servlet.class)
-@SlingServletPaths("/graphql/execute.json/cheesecake/events")
+@SlingServletResourceTypes(
+        resourceTypes = "cheesecake/components/events",
+        selectors = "model",
+        extensions = "json",
+        methods = "GET"
+)
 public class EventsServlet extends SlingSafeMethodsServlet {
-    
+
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Override
     protected void doGet(SlingHttpServletRequest request,
                         SlingHttpServletResponse response)
                         throws ServletException, IOException {
-                        
-        Resource eventsResource = request.getResourceResolver()
-                .getResource("/content/cheesecake/events");
 
-        if (eventsResource == null) {
+        Resource eventsResource = request.getResource();
+        if (ResourceUtil.isNonExistingResource(eventsResource)) {
             response.sendError(SlingHttpServletResponse.SC_NOT_FOUND,
                     "Events content not found");
             return;
@@ -41,6 +52,9 @@ public class EventsServlet extends SlingSafeMethodsServlet {
         ArrayNode events = data.putArray("events");
 
         for (Resource event : eventsResource.getChildren()) {
+            if (isSystemNode(event)) {
+                continue;
+            }
 
             ValueMap props = ResourceUtil.getValueMap(event);
 
@@ -51,9 +65,15 @@ public class EventsServlet extends SlingSafeMethodsServlet {
             eventNode.put("hours",  props.get("hours", ""));
             eventNode.put("active", props.get("active", false));
         }
+
         response.setHeader("Cache-Control", "max-age=300, public");
         response.setContentType("application/json");
         response.setCharacterEncoding("UTF-8");
         MAPPER.writeValue(response.getWriter(), root);
+    }
+
+    private static boolean isSystemNode(Resource item) {
+        String name = item.getName();
+        return name.startsWith("jcr:") || name.startsWith("rep:");
     }
 }
