@@ -1,0 +1,26 @@
+#!/bin/sh
+# Deletes the mod_cache_disk store. Stand-in for an AEM flush agent.
+# httpd.conf only routes POST /dispatcher/invalidate here, and only from
+# private addresses.
+
+CACHE_ROOT=/var/cache/apache2/proxy
+
+if [ "${REQUEST_METHOD}" != "POST" ]; then
+    printf 'Status: 405 Method Not Allowed\r\n'
+    printf 'Allow: POST\r\n'
+    printf 'Content-Type: application/json\r\n'
+    printf 'Cache-Control: no-store\r\n'
+    printf '\r\n'
+    printf '%s\n' '{"status":"method-not-allowed"}'
+    exit 0
+fi
+
+rm -rf "${CACHE_ROOT}"
+mkdir -p "${CACHE_ROOT}"
+chmod 755 "${CACHE_ROOT}"
+
+printf 'Status: 200 OK\r\n'
+printf 'Content-Type: application/json\r\n'
+printf 'Cache-Control: no-store\r\n'
+printf '\r\n'
+printf '%s\n' '{"status":"invalidated"}'

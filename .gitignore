@@ -14,3 +14,7 @@ node_modules/
 target/
 *.class
 *.jar
+
+# Local Sling web console credentials. Copy .env.example and fill in.
+.env
+.env.local

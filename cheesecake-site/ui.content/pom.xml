@@ -25,16 +25,6 @@
                     <allowIndexDefinitions>true</allowIndexDefinitions>
                 </configuration>
             </plugin>
-            <plugin>
-                <groupId>org.apache.sling</groupId>
-                <artifactId>sling-maven-plugin</artifactId>
-                <version>3.0.2</version>
-                <configuration>
-                    <slingUrl>http://localhost:8080</slingUrl>
-                    <user>admin</user>
-                    <password>admin</password>
-                </configuration>
-            </plugin>
         </plugins>
     </build>
 

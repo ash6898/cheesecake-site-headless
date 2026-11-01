@@ -12,6 +12,8 @@ services:
     build: ./dispatcher
     ports:
       - "80:80"
+      # Flush listener. Localhost only; not on the public vhost. See dispatcher/httpd.conf.
+      - "127.0.0.1:8081:8081"
     depends_on:
       - sling
     volumes:

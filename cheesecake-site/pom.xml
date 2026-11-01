@@ -16,8 +16,28 @@
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
-        <sling.url>http://localhost:8080</sling.url>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- Web console base. sling-maven-plugin posts bundles and packages to ${sling.console.url}/bundles. -->
+        <sling.console.url>http://localhost:8080/system/console</sling.console.url>
+        <!-- Supplied by the environment (see /.env.example). Never commit a password. -->
+        <sling.user>${env.SLING_ADMIN_USER}</sling.user>
+        <sling.password>${env.SLING_ADMIN_PASSWORD}</sling.password>
     </properties>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.13.0</version>
+                    <configuration>
+                        <release>17</release>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
 
     <dependencyManagement>
         <dependencies>

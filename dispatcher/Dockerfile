@@ -1,11 +1,14 @@
 FROM httpd:2.4
 
-# Create cache directory for mod_cache_disk
-RUN mkdir -p /var/cache/apache2/proxy && \
-    chown www-data:www-data /var/cache/apache2/proxy
-
-# Replace default httpd.conf with ours
 COPY httpd.conf /usr/local/apache2/conf/httpd.conf
+COPY cgi-bin/invalidate /usr/local/apache2/cgi-bin/invalidate
+COPY docker-entrypoint.sh /usr/local/bin/cheesecake-entrypoint.sh
 
-# Fix Windows line endings
-RUN sed -i 's/\r//' /usr/local/apache2/conf/httpd.conf
+RUN sed -i 's/\r//' /usr/local/apache2/conf/httpd.conf \
+        /usr/local/apache2/cgi-bin/invalidate \
+        /usr/local/bin/cheesecake-entrypoint.sh \
+    && chmod 755 /usr/local/apache2/cgi-bin/invalidate \
+        /usr/local/bin/cheesecake-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/cheesecake-entrypoint.sh"]
+CMD ["httpd-foreground"]

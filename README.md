@@ -1,139 +1,138 @@
-# 🍰 Cheesecake Site — AEM Headless Architecture Portfolio Project
+# Cheesecake Site — local AEM-style headless stack
 
-> A production food vending website for Japanese cheesecake and cheese tarts, built on a stack that mirrors Adobe Experience Manager (AEM) headless architecture exactly — without an AEM license.
+A local Docker Compose portfolio that follows the request path of an Adobe Experience Manager (AEM) headless setup: Next.js, an Apache httpd dispatcher layer, and Apache Sling with OSGi and JCR. It is not a licensed AEM instance, and it is not a deployed production site. Nothing in this repo is published to AEMaaCS, AMS, or a public host. The menu and events are sample content so the stack has something to render.
 
-**Live business:** Selling Japanese cheesecake and cheese tarts at Ontario park events.  
-**Engineering goal:** Demonstrate AEM headless architecture, Sling/OSGi development, GraphQL content delivery, and Dispatcher configuration for the Canadian AEM job market.
+There is no GraphQL runtime. The JSON endpoints are OSGi servlets. AEM persisted queries are a different mechanism; see [How this maps to AEM](#how-this-maps-to-aem).
 
----
+## Author
 
-## 📐 Architecture Overview
+**Aakash** — AEM Engineer candidate, Scarborough, Ontario
+
+- Accenture (client Chubb), January–October 2021 — AEM 6.x
+- Zoho, November 2021–December 2022 — Android
+- Nearly two years in industry, AEM then Android. Not two years of AEM.
+- AEM Sites Developer Professional certification in progress (AD0-E123)
+
+## Request flow
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                   Browser / Client                       │
-└─────────────────────┬───────────────────────────────────┘
-                      │ HTTP :3000
-┌─────────────────────▼───────────────────────────────────┐
-│              Next.js Frontend                            │
-│         Server-side fetch from Dispatcher                │
-└─────────────────────┬───────────────────────────────────┘
-                      │ HTTP :80
-┌─────────────────────▼───────────────────────────────────┐
-│           Apache httpd (Dispatcher layer)                │
-│  • Reverse proxy via mod_proxy                           │
-│  • Disk cache via mod_cache_disk                         │
-│  • Security filtering via mod_rewrite                    │
-└─────────────────────┬───────────────────────────────────┘
-                      │ HTTP :8080
-┌─────────────────────▼───────────────────────────────────┐
-│              Apache Sling                                │
-│  • OSGi bundle (MenuServlet, EventsServlet)              │
-│  • JCR content nodes (menu items, events)                │
-│  • GraphQL-style JSON endpoints                          │
-└─────────────────────────────────────────────────────────┘
+Browser  →  Next.js (:3000)  →  httpd dispatcher layer (:80)  →  Apache Sling (:8080)
 ```
 
-### AEM Headless Mapping
+1. The browser loads the page from Next.js.
+2. The Next.js server component fetches JSON from the dispatcher (`API_URL`, `http://dispatcher` on the Compose network).
+3. httpd applies a deny-by-default allow-list. Permitted GETs are served from the disk cache or proxied to Sling. Everything else is 403.
+4. Sling resolves the resource and calls the OSGi servlet registered for that resource type, selector, and extension.
+5. The servlet reads child JCR nodes and writes JSON.
 
-| This Project | AEM Equivalent |
-|---|---|
-| Apache Sling | AEM runtime (AEM is built on Sling) |
-| JCR `nt:unstructured` nodes | AEM Content Fragments |
-| Custom Sling servlet | AEM GraphQL API (`/graphql/execute.json`) |
-| Apache httpd + mod_proxy/mod_cache | AEM Dispatcher |
-| Next.js frontend | AEM headless frontend (same pattern) |
-| FileVault content package | AEM content package deployment |
+```
+┌──────────────┐   HTTP :3000   ┌──────────────┐   HTTP :80    ┌────────────────────┐   HTTP :8080   ┌──────────────┐
+│   Browser    │ ─────────────► │   Next.js    │ ────────────► │ httpd dispatcher   │ ────────────► │ Apache Sling │
+│              │                │ server fetch │               │ allow-list + cache │               │ OSGi + JCR   │
+└──────────────┘                └──────────────┘               └────────────────────┘               └──────────────┘
+```
 
----
+Sling is not exposed to the browser in this setup. The publish port 8080 is mapped for local admin (Felix console, package install) the way an engineer reaches an author or a local SDK. The dispatcher is what the frontend is configured to call.
 
-## 🗂️ Project Structure
+## How this maps to AEM
+
+| This repo | AEM equivalent | Honest gap |
+|---|---|---|
+| Browser | Browser | — |
+| Next.js server component | Headless Next.js (or SPA) consuming publish APIs | No AEM SPA Editor, no Universal Editor |
+| Apache httpd allow-list | Dispatcher `/filter` in `dispatcher.any`, first rule `deny *` | `mod_rewrite`, not `mod_dispatcher.so` |
+| `mod_cache_disk`, 5-minute TTL | Dispatcher cache. AEMaaCS `/enableTTL` is the TTL backstop | No `.stat` files |
+| `POST /dispatcher/invalidate` from a private IP | Flush replication agent. `/allowedClients` restricts who may flush. `mod_dispatcher` touches `.stat` files at `/statfileslevel` | No author instance, so nothing flushes on its own when a node changes |
+| Apache Sling + Felix + JCR | AEM publish runtime (Sling, Felix, JCR, Oak) | No author, no Oak console, no replication queue |
+| `nt:unstructured` nodes under `/content/cheesecake` with `sling:resourceType` | Content Fragments, or components addressed by resource type | No Content Fragment Models, no DAM |
+| OSGi servlet, resource type + `model` selector + `json` extension | Sling servlet or Sling Model Exporter at `*.model.json` | Hand-built JSON, not the Model Exporter |
+| AEM persisted query URL `/graphql/execute.json/<project>/<query>` | GraphQL engine runs a stored query | **Not implemented.** These servlets do not parse GraphQL |
+| FileVault content package | Content package installed with Package Manager or Cloud Manager | Installed with `sling:install` against local Sling |
+| `SLING_ADMIN_*` environment variables | Service users on publish. IMS on AEMaaCS. Console credentials are not committed | Local Sling still has a web console account; the password stays in `.env` |
+
+### Persisted queries vs these servlets
+
+AEM headless persisted queries are GraphQL documents stored in the repository and executed by the GraphQL engine:
+
+```
+GET /graphql/execute.json/<configuration>/<persisted-query-name>
+```
+
+The response is a GraphQL `data` payload (or `errors`). This project does not ship that engine. An earlier revision bound servlets directly onto `/graphql/execute.json/cheesecake/menu` and `/events` with `@SlingServletPaths`. That copied the URL and still returned hand-built JSON, which reads as GraphQL when it is not.
+
+Path binding also skips resource resolution: the servlet does not see `sling:resourceType`, selectors, or the resource Sling resolved. Adobe's servlet guidance is to register by resource type and use a selector plus an extension. These servlets now do that, and the frontend calls the resource URLs:
+
+```
+GET /content/cheesecake/menu.model.json
+GET /content/cheesecake/events.model.json
+```
+
+The `data` wrapper in the JSON is only a stable shape for the React page. Nothing parses a GraphQL document. The `model` selector matches the familiar `.model.json` URL shape; the response is not produced by `org.apache.sling.models` exporter.
+
+## Project structure
 
 ```
 cheesecake-site-headless/
-├── cheesecake-site/               # Maven multi-module project
-│   ├── pom.xml                    # Parent POM — shared deps, Sling URL
-│   ├── core/                      # OSGi bundle — Java servlets
-│   │   ├── pom.xml
-│   │   └── src/main/java/com/aakash/cheesecake/core/
-│   │       └── servlets/
-│   │           ├── MenuServlet.java    # /graphql/execute.json/cheesecake/menu
-│   │           └── EventsServlet.java  # /graphql/execute.json/cheesecake/events
-│   └── ui.content/                # FileVault content package — JCR nodes
-│       ├── pom.xml
+├── cheesecake-site/
+│   ├── pom.xml
+│   ├── core/                          # OSGi bundle
+│   │   └── src/main/java/.../servlets/
+│   │       ├── MenuServlet.java       # resource type cheesecake/components/menu
+│   │       └── EventsServlet.java     # resource type cheesecake/components/events
+│   └── ui.content/                    # FileVault package
 │       └── src/main/content/jcr_root/content/cheesecake/
-│           ├── menu/
-│           │   ├── japanese-cheesecake/.content.xml
-│           │   └── cheese-tart/.content.xml
-│           └── events/
-│               └── scarborough-bluffs-june/.content.xml
-├── dispatcher/                    # Apache httpd Dispatcher layer
+├── dispatcher/
 │   ├── Dockerfile
-│   └── httpd.conf
-├── frontend/                      # Next.js frontend
-│   ├── Dockerfile
-│   ├── app/
-│   │   ├── page.tsx               # Home page — fetches menu + events
-│   │   └── layout.tsx
-│   └── .env.local                 # API_URL for local dev
-├── docker-compose.yml             # Full stack orchestration
+│   ├── httpd.conf                     # deny-by-default allow-list
+│   ├── docker-entrypoint.sh
+│   └── cgi-bin/invalidate             # cache flush
+├── frontend/                          # Next.js
+├── scripts/
+│   ├── deploy-to-sling.sh             # build, install, flush
+│   └── flush-dispatcher.sh
+├── docker-compose.yml
+├── .env.example
 └── README.md
 ```
 
----
+## Quick start
 
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Docker Desktop
-- Node.js 22+
-- Java 17+
-- Maven 3.9+
-
-### Run the full stack
+Requirements: Docker, Java 17+, Maven 3.9+.
 
 ```bash
-# Clone the repo
-git clone https://github.com/yourusername/cheesecake-site-headless.git
-cd cheesecake-site-headless
+cp .env.example .env
+# Set SLING_ADMIN_USER and SLING_ADMIN_PASSWORD to the web console
+# account of your local Sling instance. Do not commit .env.
 
-# Start all services
-docker-compose up --build
+docker compose up --build
 ```
 
-| Service | URL |
-|---|---|
-| Next.js frontend | http://localhost:3000 |
-| Dispatcher | http://localhost:80 |
-| Sling / Felix console | http://localhost:8080/system/console |
+| Service | URL | Role |
+|---|---|---|
+| Next.js | http://localhost:3000 | Page the browser loads |
+| Dispatcher | http://localhost:80 | Allow-list, cache, proxy |
+| Dispatcher flush | http://127.0.0.1:8081/dispatcher/invalidate | POST only, localhost |
+| Sling / Felix | http://localhost:8080/system/console | Local admin only |
 
-> Default Sling credentials: `admin` / `admin`
+Sling takes a minute or two on a cold start. The page at port 3000 errors until the bundle and the content package are installed. `./scripts/deploy-to-sling.sh` reads `.env` and does three things:
 
-### Install content and bundle (first run)
+1. `mvn sling:install` for the `core` bundle. The plugin reads `SLING_ADMIN_USER` and `SLING_ADMIN_PASSWORD` from the environment.
+2. Uploads and installs the FileVault zip through Composum (`/bin/cpm/package.upload.json` and `install.json` on port 8080). `sling:install` only accepts OSGi bundles, so the package does not go through that goal. The same upload is available in the browser at http://localhost:8080/bin/packages.html. The dispatcher does not expose `/bin`.
+3. POSTs the dispatcher flush listener.
 
-```bash
-# Build and deploy OSGi bundle to Sling
-cd cheesecake-site
-mvn clean install sling:install -pl core
+Open http://localhost:3000 after the script finishes. The page reads menu and events through the dispatcher.
 
-# Build content package
-mvn clean install -pl ui.content
-```
+`docker compose up` does not need those variables. The Sling image creates its own console account. Only the install step logs in, and the password is not stored in a POM or a Compose file.
 
-Then upload `ui.content/target/cheesecake-site-content-1.0-SNAPSHOT.zip` via the Composum package manager at `http://localhost:8080/bin/packages.html`.
+## API
 
----
-
-## 📡 API Endpoints
-
-Both endpoints are registered via OSGi annotations and mirror AEM's persisted query URL pattern.
+Both URLs are Sling resource URLs. The servlet runs only when the resource type, the `model` selector, the `json` extension, and GET all match.
 
 ### Menu
 
-```
-GET /graphql/execute.json/cheesecake/menu
-```
+`GET /content/cheesecake/menu.model.json`
+
+Resource type `cheesecake/components/menu` on `/content/cheesecake/menu`.
 
 ```json
 {
@@ -144,12 +143,6 @@ GET /graphql/execute.json/cheesecake/menu
         "price": "8.00",
         "description": "Light and fluffy Japanese-style cheesecake",
         "available": true
-      },
-      {
-        "title": "Cheese Tart",
-        "price": "3.00",
-        "description": "Delicious Japanese style cheese tart with a buttery crust and creamy filling",
-        "available": true
       }
     ]
   }
@@ -158,9 +151,9 @@ GET /graphql/execute.json/cheesecake/menu
 
 ### Events
 
-```
-GET /graphql/execute.json/cheesecake/events
-```
+`GET /content/cheesecake/events.model.json`
+
+Resource type `cheesecake/components/events` on `/content/cheesecake/events`.
 
 ```json
 {
@@ -178,228 +171,108 @@ GET /graphql/execute.json/cheesecake/events
 }
 ```
 
----
+Through the dispatcher those are `http://localhost/content/cheesecake/menu.model.json` and `.../events.model.json`. Any other path, including `/system/console`, `/bin/`, `/etc/`, and `/graphql/execute.json/...`, returns 403 from httpd.
 
-## 🧱 JCR Content Nodes
+## Servlet registration
 
-Content is defined as XML files under `ui.content/` and deployed as a FileVault content package — the same mechanism used in AEM production deployments.
+```java
+@Component(service = Servlet.class)
+@SlingServletResourceTypes(
+        resourceTypes = "cheesecake/components/menu",
+        selectors = "model",
+        extensions = "json",
+        methods = "GET"
+)
+public class MenuServlet extends SlingSafeMethodsServlet {
+```
 
-### Menu item node (`nt:unstructured`)
+`doGet` uses `request.getResource()` and walks its children, so the same component still works if the node moves, as long as something requests `<path>.model.json`. `SlingSafeMethodsServlet` rejects POST, PUT, and DELETE. `ResourceUtil.getValueMap()` is used so a missing map does not have to be null-checked. Jackson writes the body.
+
+`@SlingServletPaths` was the alternative. It would have kept a hard-coded URL such as `/graphql/execute.json/cheesecake/menu` even when the content node was absent or had a different resource type. That is why the paths changed and the Next.js fetches were updated to match. The frontend still renders `data.menuItems` and `data.events`.
+
+## JCR content
+
+`ui.content` is a FileVault package filtered at `/content/cheesecake`. Collection nodes are `sling:Folder` with a `sling:resourceType`. Child items are `nt:unstructured`. On AEM the authored model would more likely be a Content Fragment model; the package format is the same idea.
 
 ```xml
 <jcr:root xmlns:jcr="http://www.jcp.org/jcr/1.0"
+          xmlns:sling="http://sling.apache.org/jcr/sling/1.0"
           jcr:primaryType="nt:unstructured"
           jcr:title="Japanese Cheesecake"
           description="Light and fluffy Japanese-style cheesecake"
           price="8.00"
-          size="small"
-          inches="4"
           available="{Boolean}true"/>
 ```
 
-> In AEM this would be a **Content Fragment** backed by a **Content Fragment Model**. On plain Sling, `nt:unstructured` nodes with typed properties serve the same structural role.
+To add a menu item, add a folder under `ui.content/.../menu/` with a `.content.xml`, then run `./scripts/deploy-to-sling.sh`. The servlet does not need a code change. The script flushes the dispatcher cache after install. Without that flush, a cached response can linger until the 5-minute TTL.
 
-### Adding a new menu item
+## Dispatcher
 
-1. Create a new folder under `ui.content/src/main/content/jcr_root/content/cheesecake/menu/`
-2. Add `.content.xml` with item properties
-3. Rebuild and reinstall the content package — no servlet code changes needed
+`dispatcher/httpd.conf` is the filter, the cache, and the proxy.
 
-```bash
-mvn clean install -pl ui.content
-# Upload new ZIP via Composum package manager
-```
+Allowed:
 
----
+| Method | Path | Where it goes |
+|---|---|---|
+| GET, HEAD | `/content/cheesecake/menu.model.json` | Sling, cacheable |
+| GET, HEAD | `/content/cheesecake/events.model.json` | Sling, cacheable |
+| POST | `http://127.0.0.1:8081/dispatcher/invalidate` | Local CGI. Not served on port 80 |
 
-## ⚙️ Dispatcher Configuration
+Everything else is forbidden before the proxy. There is no catch-all `ProxyPass /`.
 
-The Dispatcher layer (`dispatcher/httpd.conf`) replicates AEM Dispatcher's core responsibilities using native Apache httpd 2.4 modules.
+Cache rules that matter:
 
-### Module responsibilities
+- `CacheEnable` only on the two JSON paths, `CacheMaxExpire 300`, servlet `Cache-Control: max-age=300`
+- `CacheIgnoreCacheControl On` so a client `Cache-Control: no-cache` does not bypass the dispatcher cache (a browser cache and a dispatcher cache are different layers)
+- `CacheIgnoreHeaders Set-Cookie Cookie` so a session cookie is not part of the stored response
+- `CacheHeader on` adds an `X-Cache` header (`HIT` / `MISS`) for local debugging
 
-| Module | Role |
-|---|---|
-| `mod_proxy` + `mod_proxy_http` | Reverse proxy to Sling |
-| `mod_cache` + `mod_cache_disk` | Disk-based JSON response caching |
-| `mod_rewrite` | Security filtering |
-| `mod_unixd` | Unix privilege dropping |
+### Cache invalidation
 
-### Security filtering (dual-layer)
+Two mechanisms:
 
-```apache
-# Layer 1 — RewriteRule returns 403 immediately
-RewriteRule ^/system/console(.*)$ - [F,L]
-RewriteRule ^/bin/(.*)$           - [F,L]
-RewriteRule ^/etc/(.*)$           - [F,L]
+1. **TTL.** Entries expire after 300 seconds. On AEMaaCS, `/enableTTL "1"` is this kind of backstop for a missed flush.
+2. **Flush listener.** `POST http://127.0.0.1:8081/dispatcher/invalidate` deletes the `mod_cache_disk` store. `scripts/flush-dispatcher.sh` calls it. `scripts/deploy-to-sling.sh` calls it after installing content. Port 80 does not expose this URL. Compose publishes 8081 on `127.0.0.1` only. The CGI also rejects clients outside private address ranges (`127.0.0.1`, `::1`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`).
 
-# Layer 2 — ProxyPass exclusion (never proxied even if RewriteRule fails)
-ProxyPass /system/console !
-ProxyPass /bin/           !
-ProxyPass /etc/           !
-```
+That split is deliberate. AEM `/allowedClients` sees the author agent's real address. This Compose file publishes port 80 through Docker NAT, so every caller of port 80 looks like the bridge gateway and an IP rule on that vhost cannot tell a visitor from a flush. The flush therefore lives on its own listener.
 
-### Cache configuration
+On licensed AEM the primary path is different. An author flush agent sends `CQ-Action` and `CQ-Handle` (the content path) to the dispatcher. `mod_dispatcher` updates a `.stat` file instead of wiping the cache. A cached file is stale when it is older than the stat file that covers it. `/statfileslevel` decides which path segments get their own stat file, so a flush of `/content/cheesecake/menu` does not have to invalidate `/content/cheesecake/events`. This repo has no author and no `mod_dispatcher`, so it cannot do statfile invalidation. The flush endpoint clears the whole disk store, which is acceptable for two URLs and is not how a production farm should invalidate one subtree.
 
-```apache
-# Cache only GraphQL endpoints
-CacheEnable disk /graphql/execute.json/
-CacheRoot /var/cache/apache2/proxy
-CacheDefaultExpire 300       # 5 min TTL when no Cache-Control header
-CacheMaxExpire 300           # 5 min ceiling regardless of backend headers
-CacheIgnoreNoLastMod On      # Cache even without Last-Modified header
-CacheIgnoreHeaders Set-Cookie Cookie  # Strip session data from cache
-```
+Changing content in the repository does not flush by itself. Run the flush script, or wait for the TTL.
 
-> In a licensed AEM environment, `mod_dispatcher.so` and `dispatcher.any` replace this configuration. The architectural role — reverse proxy, disk cache, security filter — is identical.
+## Credentials
 
----
+`cheesecake-site/core/pom.xml` takes the console user and password from `SLING_ADMIN_USER` and `SLING_ADMIN_PASSWORD` for `sling:install`. The deploy script uses the same variables for the Composum upload and does not put them on the Maven command line. Copy `.env.example` to `.env`. `.env` is gitignored. Compose does not embed a password. Do not put a real password in a POM, a script, or the README.
 
-## 🔧 OSGi Servlet Registration
+## Screenshots
 
-Servlets are registered with Sling's OSGi container via annotations — no XML descriptors required.
+These images were taken before the resource-type registration and the allow-list filter. They still show the pieces of the stack (page, active bundle, JCR nodes, a cached JSON response, a 403 from the dispatcher). The URLs and the servlet properties on screen are the old path bindings (`/graphql/execute.json/...`, `@SlingServletPaths`). Current URLs are the `.model.json` paths above, and a path that is not on the allow-list is 403 even if it used to be proxied.
 
-```java
-@Component(service = Servlet.class)
-@SlingServletPaths("/graphql/execute.json/cheesecake/menu")
-public class MenuServlet extends SlingSafeMethodsServlet {
-
-    @Override
-    protected void doGet(SlingHttpServletRequest request,
-                         SlingHttpServletResponse response)
-                         throws ServletException, IOException {
-
-        Resource menuResource = request.getResourceResolver()
-                .getResource("/content/cheesecake/menu");
-
-        if (menuResource == null) {
-            response.sendError(404, "Menu content not found");
-            return;
-        }
-
-        // Build JSON via Jackson — safe string escaping
-        ObjectNode root = MAPPER.createObjectNode();
-        // ... iterate children, read ValueMap properties
-    }
-}
-```
-
-**Key design decisions:**
-- `SlingSafeMethodsServlet` — read-only servlet, auto-rejects POST/DELETE
-- `ResourceUtil.getValueMap()` — never returns null, safe alternative to `adaptTo()`
-- `ObjectMapper` — Jackson handles JSON serialisation and escaping, no StringBuilder concatenation
-- Null check on `getResource()` — returns 404 cleanly if content path missing
-
----
-
-## 🐳 Docker Compose
-
-```yaml
-services:
-  sling:
-    image: apache/sling:latest
-    ports: ["8080:8080"]
-    volumes:
-      - sling-launcher:/opt/sling/launcher  # Persists JCR across restarts
-
-  dispatcher:
-    build: ./dispatcher
-    ports: ["80:80"]
-    depends_on: [sling]
-    volumes:
-      - dispatcher-cache:/var/cache/apache2
-      - dispatcher-logs:/var/log/apache2
-
-  frontend:
-    build: ./frontend
-    ports: ["3000:3000"]
-    depends_on: [dispatcher]
-    environment:
-      - API_URL=http://dispatcher  # Container name resolves on shared network
-```
-
-All three services share `cheesecake-network` — containers communicate directly by service name. This mirrors AEM cloud topology where Dispatcher and publish instance are on the same private network.
-
----
-
-## 📸 Screenshots
-
-### 1. Frontend — full stack rendering live JCR data
+### Frontend
 ![Frontend home page](docs/screenshots/frontend-home.png)
-> `http://localhost:3000` — Next.js renders menu cards and events fetched through the Dispatcher from Sling JCR nodes.
 
-### 2. Felix OSGi Console — bundle active
+### Felix bundle
 ![Felix bundle active](docs/screenshots/felix-bundle-active.png)
-> `http://localhost:8080/system/console/bundles` — `com.aakash.cheesecake.core` in **Active** state, confirming the OSGi bundle deployed and resolved all dependencies.
 
-### 3. Felix OSGi Console — servlet components registered
+### Servlet components (old path registration)
 ![Felix servlet registration](docs/screenshots/felix-servlet-registration.png)
-> `http://localhost:8080/system/console/components` — search `cheesecake` — both `MenuServlet` and `EventsServlet` shown as **satisfied** Declarative Services components with their `@SlingServletPaths` properties visible.
 
-### 4. JCR Content Browser (Composum) — content nodes
+### JCR nodes
 ![JCR content browser](docs/screenshots/jcr-content-browser.png)
-> `http://localhost:8080/bin/browser.html/content/cheesecake` — `/content/cheesecake/menu` and `/content/cheesecake/events` nodes with properties expanded, equivalent to AEM Content Fragments.
 
-### 5. Dispatcher — cached JSON response with headers
+### Cached JSON through the dispatcher
 ![Dispatcher cached response](docs/screenshots/dispatcher-cached-response.png)
-> `http://localhost/graphql/execute.json/cheesecake/menu` via DevTools Network tab — JSON response served through the Dispatcher (port 80) with cache response headers visible.
 
-### 6. Dispatcher — security filtering (403 on blocked path)
+### Dispatcher 403
 ![Dispatcher 403 blocked](docs/screenshots/dispatcher-403-blocked.png)
-> `http://localhost/system/console` — Dispatcher returns **403 Forbidden**, proving the dual-layer `RewriteRule` + `ProxyPass` security filtering is active.
 
----
+## What licensed AEM would replace
 
-## 🎯 AEM JD Alignment
-
-This project directly addresses the following requirements from AEM Developer roles:
-
-| JD Requirement | How this project demonstrates it |
+| Here | On AEM |
 |---|---|
-| AEM headless CMS, content fragments, APIs | JCR nodes as Content Fragment equivalent, custom GraphQL-style API |
-| Apache Sling, Apache Felix, OSGi | OSGi bundle with servlet registered via DS annotations |
-| AEM Dispatcher caching, routing, security | Full httpd config with mod_cache, mod_proxy, mod_rewrite |
-| Next.js headless frontend collaboration | Server-side Next.js fetching from Dispatcher-cached JSON |
-| JCR | Content nodes defined as XML, deployed via FileVault |
-| RESTful APIs, JSON | Two JSON endpoints at AEM persisted query URL pattern |
-| Git-based workflows | Conventional Commits, module-level commits per layer |
-| Debugging across AEM and infrastructure | Diagnosed Docker networking, cache scoping, OSGi module dependencies |
-
----
-
-## 🗺️ What Would Change in Licensed AEM
-
-| This project | Licensed AEM equivalent |
-|---|---|
-| `nt:unstructured` nodes | Content Fragments with Content Fragment Models |
-| Custom Sling servlet | AEM's built-in GraphQL API (auto-generated from CF Models) |
-| `mod_proxy` + `mod_cache` | `mod_dispatcher.so` + `dispatcher.any` |
-| Manual cache TTL | Flush agent triggered on content publish |
-| `admin:admin` credentials | IMS authentication, service users |
-| Local Docker | AEM as a Cloud Service (AEMaaCS) on Azure |
-
----
-
-## 🏗️ Built With
-
-- [Apache Sling](https://sling.apache.org/) — content framework
-- [Apache Felix](https://felix.apache.org/) — OSGi container
-- [Apache httpd 2.4](https://httpd.apache.org/) — Dispatcher layer
-- [Next.js 16](https://nextjs.org/) — React frontend framework
-- [Jackson](https://github.com/FasterXML/jackson) — JSON serialisation
-- [FileVault](https://jackrabbit.apache.org/filevault/) — JCR content packaging
-- [Docker Compose](https://docs.docker.com/compose/) — multi-container orchestration
-- [Tailwind CSS](https://tailwindcss.com/) — utility-first styling
-
----
-
-## 👨‍💻 Author
-
-**Aakash** — AEM Developer candidate  
-2+ years Java/Android (Accenture AEM 6.5, Zoho)  
-AEM Sites Developer Professional certification in progress (AD0-E123)  
-Based in Scarborough, Ontario 🇨🇦
-
----
-
-*This project was built as a real production website for a food vending business while simultaneously serving as a portfolio demonstration of AEM headless architecture — without an AEM license.*
+| `nt:unstructured` + a resource type | Content Fragment model, or a component with a Sling Model |
+| Servlet that writes JSON | Model Exporter (`.model.json`) or the GraphQL engine for persisted queries |
+| httpd `mod_proxy` + `mod_cache_disk` + `mod_rewrite` | `mod_dispatcher.so` + `dispatcher.any` |
+| TTL plus `POST /dispatcher/invalidate` | Flush agent, `.stat` files, `/statfileslevel`, `/allowedClients`, TTL as a backstop |
+| Env vars for the local console | Service users, and IMS on AEMaaCS |
+| `docker compose up` | Cloud Manager pipeline onto AEMaaCS, or an AMS dispatcher farm |
